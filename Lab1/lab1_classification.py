@@ -199,7 +199,7 @@ class Pytorch_CNN(nn.Module):
         conv_kernel = 3
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = nn.Sequential(nn.Conv2d(channels, covnv_filter[0], conv_kernel, padding=1),
-                                nn.ReLU(),
+                                nn.BatchNorm2d(covnv_filter[0]),
                                 #########################################
                                 nn.Conv2d(covnv_filter[0], covnv_filter[1], conv_kernel, padding=1),
                                 nn.ReLU(),
@@ -208,20 +208,21 @@ class Pytorch_CNN(nn.Module):
                                 #########################################
                                 nn.Conv2d(covnv_filter[1], covnv_filter[2], conv_kernel, padding=1),
                                 nn.ReLU(),
+                                nn.BatchNorm2d(covnv_filter[2]),
                                 #########################################
                                 nn.Conv2d(covnv_filter[2], covnv_filter[3], conv_kernel, padding=1),
                                 nn.ReLU(),
                                 nn.MaxPool2d(kernel_size=2, stride=2),
-                                nn.Dropout(0.8),
                                 nn.BatchNorm2d(covnv_filter[3]),
                                 #########################################
                                 nn.Conv2d(covnv_filter[3], covnv_filter[4], conv_kernel, padding=1),
                                 nn.ReLU(),
+                                nn.MaxPool2d(kernel_size=2, stride=2),
+                                nn.BatchNorm2d(covnv_filter[4]),
                                 #########################################
                                 nn.Conv2d(covnv_filter[4], covnv_filter[5], conv_kernel, padding=1),
                                 nn.ReLU(),
-                                nn.MaxPool2d(kernel_size=2, stride=2),
-                                nn.Dropout(0.8),
+                                nn.Dropout(0.5),
                                 nn.BatchNorm2d(covnv_filter[5]),
                                 #########################################
                                 nn.Flatten(),  
@@ -233,7 +234,7 @@ class Pytorch_CNN(nn.Module):
     def generate_batch(self, x, y, batch_size):
         for i in range(0, int(len(x)), batch_size):
             yield x[i:i+batch_size], y[i:i+batch_size]
-    def train(self, x, y, xTest, yTest, epochs = 2000):
+    def train(self, x, y, xTest, yTest, epochs = 50):
         tensor_x = torch.from_numpy(x).float().to(self.device)
         tensor_y = torch.from_numpy(y).float().to(self.device)
         
@@ -241,7 +242,7 @@ class Pytorch_CNN(nn.Module):
         criterion = nn.CrossEntropyLoss()
         for epoch in range(epochs):
             correct = 0
-            for x_batch, y_batch in self.generate_batch(tensor_x, tensor_y, 2048):
+            for x_batch, y_batch in self.generate_batch(tensor_x, tensor_y, 1024):
                 optimizer.zero_grad()
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
