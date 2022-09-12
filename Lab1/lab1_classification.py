@@ -4,9 +4,12 @@ import torch
 import torchvision
 import tensorflow as tf                                     # NOTE: This is just for utils. Do not use tensorflow in your code.
 from tensorflow.keras.utils import to_categorical           # NOTE: This is just for utils. Do not use tensorflow in your code.
+import torch.nn.functional as F
+import torch.optim as optim
 import random
 from torch import nn
 
+NEURONS_PER_LAYER_NUMPY = 32
 # Setting random seeds to keep everything deterministic.
 random.seed(1618)
 np.random.seed(1618)
@@ -15,14 +18,14 @@ torch.manual_seed(1618)
 
 # Use these to set the algorithm to use.
 #ALGORITHM = "guesser"
-ALGORITHM = "custom_ann"
+#ALGORITHM = "custom_ann"
 #ALGORITHM = "pytorch_ann"
-#ALGORITHM = "pytorch_cnn"
+ALGORITHM = "pytorch_cnn"
 
-DATASET = "mnist_d"             # Handwritten digits.
+#DATASET = "mnist_d"             # Handwritten digits.
 #DATASET = "mnist_f"            # Scans of types of clothes.
 #DATASET = "cifar_10"           # Color images (10 classes).
-#DATASET = "cifar_100_f"        # Color images (100 classes).
+DATASET = "cifar_100_f"        # Color images (100 classes).
 #DATASET = "cifar_100_c"        # Color images (20 classes).
 
 
@@ -61,32 +64,67 @@ class Custom_ANN():
     # Activation function.
     def _sigmoid(self, x):
         return 1 / (1 + np.exp(-x))
-
     # Activation prime function.
     def _sigmoidDerivative(self, x):
         return x * (1 - x)
-
+    def _reLu(self, x):
+        return np.maximum(0, x)
+    def _reLuDerivative(self, x):
+        x[x<=0] = 0
+        x[x>0] = 1
+        return x
+    def activation(self, xVals, activation):
+        if activation == "sigmoid":
+            return self._sigmoid(xVals)
+        elif activation == "reLu":
+            return self._reLu(xVals)
+    def activationDerivative(self, xVals, activation):
+        if activation == "sigmoid":
+            return self._sigmoidDerivative(xVals)
+        elif activation == "reLu":
+            return self._reLuDerivative(xVals)
     # Batch generator for mini-batches. Not randomized.
     def _batchGenerator(self, l, n):
         for i in range(0, len(l), n):
             yield l[i : i + n]
-
     # Training with backpropagation.
-    def train(self, xVals, yVals, epochs = 100, minibatches = True, mbs = 100):
+    def train(self, xVals, yVals, activation="sigmoid",epochs = 100, minibatches = True, mbs = 100):
         #TODO: Implement backprop. allow minibatches. mbs should specify the size of each minibatch.
-
-        pass
+        for i in range(epochs):
+            if minibatches:
+                for x_batch, y_batch in zip(self._batchGenerator(xVals, mbs), self._batchGenerator(yVals, mbs)):
+                    layer1, layer2 = self._forward(x_batch, activation)
+                    L2e = -(layer2 - y_batch)
+                    L2d = L2e*self.activationDerivative(layer2, activation)
+                    L1e = L2d.dot(self.W2.T)
+                    L1d = L1e*self.activationDerivative(layer1, activation)
+                    L1a = (x_batch.T.dot(L1d))*self.lr
+                    L2a = (layer1.T.dot(L2d))*self.lr
+                    self.W1 += L1a
+                    self.W2 += L2a
+            else:
+                layer1, layer2 = self._forward(xVals, activation)
+                L2e = -(layer2 - y_batch)
+                L2d = L2e*self.activationDerivative(layer2, activation)
+                L1e = L2d.dot(self.W2.T)
+                L1d = L1e*self.activationDerivative(layer1, activation)
+                L1a = (xVals.T.dot(L1d))*self.lr
+                L2a = (layer1.T.dot(L2d))*self.lr
+                self.W1 += L1a
+                self.W2 += L2a
 
     # Forward pass.
-    def _forward(self, input):
-        layer1 = self._sigmoid(np.dot(input, self.W1))
-        layer2 = self._sigmoid(np.dot(layer1, self.W2))
+    def _forward(self, input, activation="sigmoid"):
+        layer1 = self.activation(np.dot(input, self.W1), activation)
+        layer2 = self.activation(np.dot(layer1, self.W2), activation)
         return layer1, layer2
 
     # Predict.
     def __call__(self, xVals):
         _, layer2 = self._forward(xVals)
-        return layer2
+        output = np.zeros_like(layer2)
+        output[np.arange(len(layer2)), layer2.argmax(1)] = 1
+        return output
 
 
 #==========================<Pytorch Neural Net>=================================
@@ -98,11 +136,48 @@ class Custom_ANN():
 '''
 
 class Pytorch_ANN(nn.Module):
-    def __init__(self):
+    def __init__(self, inputSize, outputSize):
         super(Pytorch_ANN, self).__init__()
-
+        self.inputSize = inputSize
+        self.outputSize = outputSize
+        self.hiddenSize = [512, 256, 128]
+    
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = nn.Sequential(nn.Linear(self.inputSize, self.hiddenSize[0]),
+                                nn.ReLU(),
+                                nn.Linear(self.hiddenSize[0], self.hiddenSize[1]),
+                                nn.ReLU(),
+                                nn.Linear(self.hiddenSize[1], self.hiddenSize[2]),
+                                nn.ReLU(),
+                                nn.Linear(self.hiddenSize[2], outputSize)).to(self.device)
+        
+    def generate_batch(self, x, y, batch_size):
+        for i in range(0, len(x), batch_size):
+            yield x[i:i+batch_size], y[i:i+batch_size]      
     def forward(self, x):
-        raise NotImplementedError()
+        tensor_x = torch.from_numpy(x).float()
+        tensor_x = tensor_x.to(self.device)
+        return self.model(tensor_x)
+        
+    def train(self, x, y, epochs = 500):
+        optimizer = optim.SGD(self.model.parameters(), lr=0.1, momentum=0.9)
+        criterion = nn.CrossEntropyLoss()
+        tensor_y = torch.from_numpy(y).float()
+        tensor_y = tensor_y.to(self.device)
+        for i in range(epochs):
+            for x_batch, y_batch in self.generate_batch(x, tensor_y, 500):
+                optimizer.zero_grad()
+                output = self.forward(x_batch)
+                loss = criterion(output, y_batch)
+                loss.backward()
+                optimizer.step()
+    def __call__(self, x):
+        output = self.forward(x)
+        # covert tensor to numpy array
+        output = output.cpu().detach().numpy()
+        result = np.zeros_like(output)
+        result[np.arange(len(output)), output.argmax(1)] = 1
+        return result
 
 
 
@@ -115,12 +190,85 @@ class Pytorch_ANN(nn.Module):
 '''
 
 class Pytorch_CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, input_W, input_H, channels, outputSize):
+        conv_size = 4
+        if input_W == 28: conv_size = 3
+        
         super(Pytorch_CNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+        covnv_filter = [32, 64, 128, 128, 256, 256]
+        conv_kernel = 3
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = nn.Sequential(nn.Conv2d(channels, covnv_filter[0], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                #########################################
+                                nn.Conv2d(covnv_filter[0], covnv_filter[1], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                nn.MaxPool2d(kernel_size=2, stride=2),
+                                nn.BatchNorm2d(covnv_filter[1]),
+                                #########################################
+                                nn.Conv2d(covnv_filter[1], covnv_filter[2], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                #########################################
+                                nn.Conv2d(covnv_filter[2], covnv_filter[3], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                nn.MaxPool2d(kernel_size=2, stride=2),
+                                nn.Dropout(0.8),
+                                nn.BatchNorm2d(covnv_filter[3]),
+                                #########################################
+                                nn.Conv2d(covnv_filter[3], covnv_filter[4], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                #########################################
+                                nn.Conv2d(covnv_filter[4], covnv_filter[5], conv_kernel, padding=1),
+                                nn.ReLU(),
+                                nn.MaxPool2d(kernel_size=2, stride=2),
+                                nn.Dropout(0.8),
+                                nn.BatchNorm2d(covnv_filter[5]),
+                                #########################################
+                                nn.Flatten(),  
+                                nn.Linear(256*conv_size*conv_size, 1024),
+                                nn.ReLU(),
+                                nn.Linear(1024, 512),
+                                nn.ReLU(),
+                                nn.Linear(512, outputSize)).to(self.device)
+    def generate_batch(self, x, y, batch_size):
+        for i in range(0, int(len(x)), batch_size):
+            yield x[i:i+batch_size], y[i:i+batch_size]
+    def train(self, x, y, xTest, yTest, epochs = 2000):
+        tensor_x = torch.from_numpy(x).float().to(self.device)
+        tensor_y = torch.from_numpy(y).float().to(self.device)
+        
+        optimizer = optim.Adam(self.model.parameters())
+        criterion = nn.CrossEntropyLoss()
+        for epoch in range(epochs):
+            correct = 0
+            for x_batch, y_batch in self.generate_batch(tensor_x, tensor_y, 2048):
+                optimizer.zero_grad()
+                output = self.model(x_batch)
+                loss = criterion(output, y_batch)
+                loss.backward()
+                optimizer.step()
+                # calculate training accuracy
+                output = output.cpu().detach().numpy()
+                pred = np.zeros_like(output)
+                pred[np.arange(len(output)), output.argmax(1)] = 1
+                correct += (pred == y_batch.cpu().detach().numpy()).all(axis=-1).sum()
+            # calculate validation accuracy
+            x_test = torch.from_numpy(xTest).float().to(self.device)
+            valid_output = self.model(x_test)
+            valid_output = valid_output.cpu().detach().numpy()
+            valid_pred = np.zeros_like(valid_output)
+            valid_pred[np.arange(len(valid_output)), valid_output.argmax(1)] = 1
+            valid_acc = (valid_pred == yTest).all(axis=-1).sum() 
 
-    def forward(self, x):
-        raise NotImplementedError()
+            print("Epoch:", epoch+1 , "| Loss:", round(loss.item(),5), "| Training Accuracy:",round(100. * correct / len(x),2), "%", "| Validation Accuracy:", round(100. * valid_acc /len(xTest),2), "%")
+    def __call__(self, x):
+        x = torch.from_numpy(x).float().to(self.device)
+        output = self.model(x)
+        # covert tensor to numpy array
+        output = output.cpu().detach().numpy()
+        result = np.zeros_like(output)
+        result[np.arange(len(output)), output.argmax(1)] = 1
+        return result
 
 
 
@@ -177,7 +325,15 @@ def getRawData():
 
 
 def preprocessData(raw, numClasses, imgW, imgH, imgC):
-    ((xTrain, yTrain), (xTest, yTest)) = raw            #TODO: Add range reduction here (0-255 ==> 0.0-1.0).
+    ((xTrain, yTrain), (xTest, yTest)) = raw  #TODO: Add range reduction here (0-255 ==> 0.0-1.0).
+    xTrain = xTrain/255.0 
+    xTest = xTest/255.0
+    if (ALGORITHM != "pytorch_cnn"):
+        xTrain = xTrain.reshape(xTrain.shape[0], imgW*imgH)
+        xTest = xTest.reshape(xTest.shape[0], imgW*imgH)
+    else:
+        xTrain = xTrain.reshape(-1, imgC, imgW, imgH)
+        xTest = xTest.reshape(-1, imgC, imgW, imgH)
     yTrainP = to_categorical(yTrain, numClasses)
     yTestP = to_categorical(yTest, numClasses)
     print("New shape of xTrain dataset: %s." % str(xTrain.shape))
@@ -188,18 +344,26 @@ def preprocessData(raw, numClasses, imgW, imgH, imgC):
 
 
 
-def trainModel(data, numClasses, imgW, imgH, imgC):
+def trainModel(data, test, numClasses, imgW, imgH, imgC):
     xTrain, yTrain = data
+    xTest, yTest = test
     if ALGORITHM == "guesser":
         return guesserClassifier   # Guesser has no training, as it is just guessing.
-    elif ALGORITHM == "custom_net":
-        print("Building and training Custom_NN.")
-        print("Not yet implemented.")                   #TODO: Write code to build and train your custon neural net.
-        return None
-    elif ALGORITHM == "tf_net":
-        print("Building and training TF_NN.")
-        print("Not yet implemented.")                   #TODO: Write code to build and train your keras neural net.
-        return None
+    elif ALGORITHM == "custom_ann":
+        print("Building and training Custom_ANN.")
+        c_ann = Custom_ANN(inputSize=imgW*imgH*imgC, outputSize=numClasses, neuronsPerLayer=NEURONS_PER_LAYER_NUMPY)
+        c_ann.train(xTrain, yTrain)
+        return c_ann
+    elif ALGORITHM == "pytorch_ann":
+        print("Building and training Pytorch_ANN.")
+        p_ann = Pytorch_ANN(inputSize=imgW*imgH*imgC, outputSize=numClasses)
+        p_ann.train(xTrain, yTrain)
+        return p_ann
+    elif ALGORITHM == "pytorch_cnn":
+        print("Building and training Pytorch_CNN.")
+        p_cnn = Pytorch_CNN(imgW, imgH, imgC, outputSize=numClasses)
+        p_cnn.train(xTrain, yTrain, xTest, yTest)
+        return p_cnn
     else:
         raise ValueError("Algorithm not recognized.")
 
@@ -227,7 +391,7 @@ def evalResults(data, preds):   #TODO: Add F1 score confusion matrix here.
 def main():
     raw, nc, w, h, ch = getRawData()
     data = preprocessData(raw, nc, w, h, ch)
-    model = trainModel(data[0], nc, w, h, ch)
+    model = trainModel(data[0], data[1], nc, w, h, ch)
     preds = runModel(data[1][0], model)
     evalResults(data[1], preds)
 
