@@ -217,6 +217,7 @@ class Pytorch_CNN(nn.Module):
         conv_kernel = 3
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = nn.Sequential(nn.Conv2d(channels, covnv_filter[0], conv_kernel, padding=1),
+                                nn.ReLu(),
                                 nn.MaxPool2d(kernel_size=2, stride=2),
                                 nn.BatchNorm2d(covnv_filter[0]),
                                 nn.Dropout(0.3),
