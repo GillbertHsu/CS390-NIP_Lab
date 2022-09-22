@@ -33,8 +33,8 @@ ALGORITHM = "pytorch_cnn"
 
 #DATASET = "mnist_d"             # Handwritten digits.
 #DATASET = "mnist_f"            # Scans of types of clothes.
-DATASET = "cifar_10"           # Color images (10 classes).
-#DATASET = "cifar_100_f"        # Color images (100 classes).
+#DATASET = "cifar_10"           # Color images (10 classes).
+DATASET = "cifar_100_f"        # Color images (100 classes).
 #DATASET = "cifar_100_c"        # Color images (20 classes).
 
 
@@ -217,7 +217,7 @@ class Pytorch_CNN(nn.Module):
         conv_kernel = 3
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model = nn.Sequential(nn.Conv2d(channels, covnv_filter[0], conv_kernel, padding=1),
-                                nn.ReLu(),
+                                nn.ReLU(),
                                 nn.MaxPool2d(kernel_size=2, stride=2),
                                 nn.BatchNorm2d(covnv_filter[0]),
                                 nn.Dropout(0.3),
